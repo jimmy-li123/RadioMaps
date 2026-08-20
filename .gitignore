@@ -1,0 +1,26 @@
+# TODO ACTUALLY READ
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Large dataset caches & saved checkpoints
+data/processed/
+saved_models/
+*.npy
+*.mat
+*.pkl
+
+# IDE settings
+.vscode/
+.idea/
+
+
+# results
+outputs/

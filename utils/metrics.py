@@ -36,7 +36,7 @@ B = config.B
 lamda = config.LAMBDA_VAL
 d = config.ANTENNA_SPACING
 
-
+# ? Fix 
 # =====================================================================      
 # Data Preprocessing Functions                                               
 # =====================================================================  
@@ -128,7 +128,7 @@ def normalise_V(V):
     input:  V (N, Nc, Nt, 1) or (N, Nc, Nt)                                  
     output: V_norm (same shape)                                              
     """         
-    # ? Fix                                                                                                                            
+                                                                                                                              
     if V.ndim == 4 and V.shape[-1] == 1:                                 
         V_conj_tran = np.transpose(V, (0, 1, 3, 2)).conjugate()          
         V_power = np.matmul(V_conj_tran, V)                              
@@ -157,8 +157,22 @@ def cal_SE(H, V, noise):
     rate_Nc = np.mean(rate, axis=1)                     # Average over subcarriers                                                                    
     return rate_Nc       
 
+# ? Faster SVD - V_opt = H^H/abs(H)
+def cal_opt_SE(H, noise):
+    """
+    Calculates optimal spectral efficiency given appropriate CSI
+    
+    input: H (N, Nc, Nr, Nt) , noise (float)
+    output: rate_Nc (N, )
+    """   
+    H_H = np.transpose(H, (0, 1, 3, 2)).conjugate()
+    H_norm = np.linalg.norm(H, axis = -1, keepdims = True) 
+    V_opt = H_H / (H_norm + 1e-12)
+    return cal_SE(H, V_opt, noise)
 
 
+# Computes SE of Los and NLos conditions
+# form a 1D array of SE of each user
 def compute(rate_Nc, LoS_test=None):
     """                                                                      
     Computes separate Spectral Efficiency for LoS and NLoS conditions.       
@@ -169,8 +183,8 @@ def compute(rate_Nc, LoS_test=None):
     if LoS_test is None:                                                     
         LoS = np.load(config.PROCESSED_DATA_DIR / 'LoS.npy')                                
         LoS = LoS[LoS != -1]                                                 
-        _, LoS_test = train_test_split(LoS, test_size=0.2, random_state=1)   
-                                                                                
+        _, LoS_test = train_test_split(LoS, test_size=config.TEST_SIZE, random_state=config.RANDOM_SEED)   
+                                                                        
     if isinstance(rate_Nc, torch.Tensor):                                    
         rate_Nc = rate_Nc.detach().cpu().numpy()                             
     if isinstance(LoS_test, torch.Tensor):                                   
@@ -189,3 +203,8 @@ def compute(rate_Nc, LoS_test=None):
 # Custom Loss Function & PyTorch Training Loop                               
 # =====================================================================      
 #! TODO
+# class SE_loss(nn.Module):
+
+
+# def train(x_train, y_train, x_test, H, model, noise, epoch):
+    

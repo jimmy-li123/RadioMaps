@@ -147,7 +147,7 @@ def process_dataset():
     delay_matrix = np.where(valid_paths[:, :, None], np.exp(delay_phase), 0.0 + 0.0j)
 
     # Base station array steering matrix: exp(-j * 2 * pi * m * d * sin(AoD) / lambda) -> shape (N_ue, L_max, Nt)
-    steering_phase = -2j * np.pi * (d / lambda_val) * np.einsum('t,ul->ult', antenna_indices, np.sin(aod_rad))
+    steering_phase = 2j * np.pi * (d / lambda_val) * np.einsum('t,ul->ult', antenna_indices, np.sin(aod_rad))
     steering_matrix = np.where(valid_paths[:, :, None], np.exp(steering_phase), 0.0 + 0.0j)
 
     # Channel tensor per user: sum across L_max paths -> shape (N_ue, Nc, Nt)

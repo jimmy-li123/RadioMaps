@@ -21,7 +21,7 @@ PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
 SAVED_MODELS_DIR   = BASE_DIR / "saved_models"
 OUTPUTS_DIR        = BASE_DIR / "outputs"
                                                                                 
-             # Physical & MIMO Array Constants                                               
+# Physical & MIMO Array Constants                                               
 FC = 3.5e9   # 3.5 GHz carrier frequency                               
 B  = 10.0e6  # 10 MHz bandwidth                                        
 C  = 3.0e8   # Speed of light                                          
@@ -31,20 +31,22 @@ NT              = 32                # Transmit antennas at Base Station
 NR              = 1                 # Single antenna user equipment                           
 NC              = 12                # 12 OFDM subcarriers                                     
                                                                                 
-                               # Simulation Defaults                                                           
+# Simulation Defaults                                                           
 DEFAULT_SNR          = 15.0    # dB                                                 
 DEFAULT_FADING_RATIO = 0.1     # Rayleigh scattering K                              
 DEFAULT_LOC_STD      = 1.0     # GPS standard deviation (meters)                    
 DEFAULT_ETA          = 50      # Reduced pilot density (50%)                        
 PILOT_OVERHEAD_RATIO = 0.0476  # 8 pilot REs / 168 total REs per RB             
                                                                                 
-  # Benchmark Sweeps                                                              
+# Benchmark Sweeps                                                              
 SWEEP_SNR          = [0, 5, 10, 15, 20, 25, 30]
 SWEEP_LOC_STD      = [0, 1, 2, 3, 4, 5]
 SWEEP_FADING_RATIO = [0.0, 0.05, 0.1, 0.15, 0.2]
 SWEEP_ETA          = [25, 50, 75, 100]
-                                                                                
-  # Training Hyperparameters                                                      
+
+# Training Hyperparameters                                                      
+TEST_SIZE     = 0.2
+RANDOM_SEED   = 1
 BATCH_SIZE    = 128
 LEARNING_RATE = 1e-3
 EPOCHS_RM     = 1000

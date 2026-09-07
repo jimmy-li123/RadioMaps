@@ -27,13 +27,13 @@ BSloc = np.load(config.PROCESSED_DATA_DIR / 'BSloc.npy')
 CSI   = np.load(config.PROCESSED_DATA_DIR / 'CSI.npy')                                               
 LoS   = np.load(config.PROCESSED_DATA_DIR / 'LoS.npy')    
 
-                                            # Process data
-[UEloc, CSI] = eliminate_block(UEloc, CSI)  # should be redundant
+# Process data
+UEloc, CSI = eliminate_block(UEloc, CSI)  # should be redundant
 CSI = CSI / np.max(np.abs(CSI))
 CSI_fading = add_fading(CSI, fading_ratio)
 
 # Divide train and test set
-x_train, x_test,y_train, y_test, los_train, los_test = train_test_split(
+x_train, x_test, y_train, y_test, LoS_train, LoS_test = train_test_split(
     UEloc, CSI_fading, LoS, 
     test_size=config.TEST_SIZE, 
     random_state=config.RANDOM_SEED
@@ -63,7 +63,7 @@ V_GBM = normalise_V(V_GBM)
 power = (np.linalg.norm(CSI_fading))**2/np.prod(CSI_fading.shape)
 noise = power / (10**(SNR/10))
 
-# Calculate SE and optimaum of GBM
+# Calculate SE and optimum of GBM
 GBM_SE = cal_SE(y_test, V_GBM, noise)
 opt_SE = cal_opt_SE(y_test, noise)
 
@@ -71,8 +71,8 @@ opt_SE = cal_opt_SE(y_test, noise)
 GBM2opt = np.mean(GBM_SE) / np.mean(opt_SE) * 100                                           
                                                                                                         
 # Compute LoS and NLoS metrics                                                                       
-GBM_LoS_SE, GBM_NLoS_SE = compute(GBM_SE, los_test)                                                  
-opt_LoS_SE, opt_NLoS_SE = compute(opt_SE, los_test)                                                  
+GBM_LoS_SE, GBM_NLoS_SE = compute(GBM_SE, LoS_test)                                                  
+opt_LoS_SE, opt_NLoS_SE = compute(opt_SE, LoS_test)                                                  
                                                                                                         
 GBM2opt_LoS = (GBM_LoS_SE / opt_LoS_SE) * 100 if opt_LoS_SE > 0 else 0.0                             
 GBM2opt_NLoS = (GBM_NLoS_SE / opt_NLoS_SE) * 100 if opt_NLoS_SE > 0 else 0.0  

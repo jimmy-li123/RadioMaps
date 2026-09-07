@@ -33,8 +33,8 @@ CSI_fading = add_fading(CSI, fading_ratio)
 # Diving training and test set
 x_train, x_test, y_train, y_test, AoD_train, AoD_test, LoS_train, LoS_test = train_test_split(
     UEloc, CSI_fading, AoD, LoS,
-    test_size= config.TEST_SIZE, 
-    random_state=config.RANDOM_SEED
+    test_size = config.TEST_SIZE, 
+    random_state = config.RANDOM_SEED
 )
 N_train, N_test = AoD_train.shape[0], AoD_test.shape[0]
 
@@ -71,8 +71,6 @@ noise = power / (10 ** (SNR / 10))
 ## Calculate spectral efficiency and optimum
 CKM_SE = cal_SE(y_test, V_CKM, noise)
 opt_SE = cal_opt_SE(y_test, noise)
-
-
 
 # Calculate ratio
 CKM2opt = np.mean(CKM_SE) / np.mean(opt_SE) * 100                                           

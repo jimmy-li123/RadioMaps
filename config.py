@@ -27,6 +27,7 @@ B  = 10.0e6  # 10 MHz bandwidth
 C  = 3.0e8   # Speed of light                                          
 LAMBDA_VAL      = C / FC
 ANTENNA_SPACING = LAMBDA_VAL / 2.0
+N_USERS         = 27805
 NT              = 32                # Transmit antennas at Base Station                       
 NR              = 1                 # Single antenna user equipment                           
 NC              = 12                # 12 OFDM subcarriers                                     
@@ -46,6 +47,7 @@ SWEEP_ETA          = [25, 50, 75, 100]
 
 # Training Hyperparameters                                                      
 TEST_SIZE     = 0.2
+VAL_SIZE      = 0.125   # 1/8 (10% of 80% train+val size)
 RANDOM_SEED   = 1
 BATCH_SIZE    = 128
 LEARNING_RATE = 1e-3

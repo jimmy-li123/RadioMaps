@@ -16,8 +16,11 @@ Steps for Implementation:
 
 import os
 import sys
+import time
 from pathlib import Path
 import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn.model_selection import train_test_split
 
@@ -30,11 +33,11 @@ import config
 # =====================================================================      
 # Configuration & Communication Parameters                                   
 # ===================================================================== 
-c = config.C
-f = config.FC
-B = config.B
+c     = config.C
+f     = config.FC
+B     = config.B
 lamda = config.LAMBDA_VAL
-d = config.ANTENNA_SPACING
+d     = config.ANTENNA_SPACING
 
 # ? Fix 
 # =====================================================================      
@@ -202,9 +205,122 @@ def compute(rate_Nc, LoS_test=None):
 # =====================================================================      
 # Custom Loss Function & PyTorch Training Loop                               
 # =====================================================================      
-#! TODO
-# class SE_loss(nn.Module):
-
-
-# def train(x_train, y_train, x_test, H, model, noise, epoch):
+# Apparently classes should be in CamelCase
+class SELoss(nn.Module):
+    """
+    Unsupervised SE Loss
+    Minimises negative Shannon rate
+    """
+    def __init__(self, noise):
+        super().__init__()
+        self.noise = noise
     
+    # nn.module always calls foward when invoked with criterion
+    def forward(self, H, V):
+        # H: (N, Nc, 1, Nt)
+        # V: (N, Nc, Nt, 1)
+
+        # Normalising
+        V_power = torch.sum(torch.abs(V)**2, dim=-2, keepdim=True)  # targets Nt
+        V_norm = V / torch.sqrt(V_power + 1e-12)
+
+        # Received gain: |H * V_norm|^2
+        HV = torch.matmul(H, V_norm)    # (N, Nc, 1, 1)
+        HV_gain = torch.abs(torch.squeeze(HV, dim=-1))**2   # (N, Nc, 1)
+        
+        # Shannon's capacity: log2(1 + SNR)
+        SNR = HV_gain / self.noise
+        rate = torch.log2(1.0 + SNR)
+        return -torch.mean(rate)
+        
+# ! Overfitting test w 5 samples
+def train_model(model, x_train, y_train, x_test, y_test, noise, 
+          epochs=1000, batch_size=128, lr=1e-3, save_path=None, device=None):
+    """
+    Universal training loop for models
+    """
+    if device is None:
+        device = config.DEVICE
+    
+    # Initialise
+    model = model.to(device)                                            # Use GPU if available
+    criterion = SELoss(noise).to(device)                               # Initialises criterion object
+    optimiser = torch.optim.Adam(model.parameters(), lr=lr)             # model.parameters holds weights and biases
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(             # Dynamically changes optim factor
+        optimiser, mode='min', factor=0.1, patience=50, min_lr=1e-6
+    )
+    
+    # Convert to PyTorch Tensors
+    x_tr = torch.as_tensor(x_train, dtype=torch.float32)    # x is real valued
+    y_tr = torch.as_tensor(y_train, dtype=torch.complex64)  # y is im
+    x_vl = torch.as_tensor(x_test, dtype=torch.float32)
+    y_vl = torch.as_tensor(y_test, dtype=torch.complex64)
+
+    # Separate into batches
+    train_dataset = TensorDataset(x_tr, y_tr)       # Separates input into paired samples
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)   # Split into shuffled mini batches
+
+    best_val_loss = float('inf')    # Initial loss
+    history = {'train_loss': [], 'val_loss': []}
+    
+    print(f"Starting training on {device} ({epochs} epochs, batch_size={batch_size})...")
+
+    t0_total = time.perf_counter()
+    t0_interval = time.perf_counter()
+
+    try:
+        for epoch in range(1, epochs + 1):  # [1, epoch]
+            model.train()                   # Set to training mode, zeros some activations to prevent overfitting
+            total_train_loss = 0.0
+            
+            for bx, by in train_loader:
+                bx, by = bx.to(device), by.to(device)
+                optimiser.zero_grad()           # Reset gradients from parameters
+                
+                v_pred = model(bx)              # Forward pass
+                loss = criterion(by, v_pred)    # Compute loss
+                loss.backward()                 # Populate .grad buffers with fresh gradients
+                optimiser.step()                # Updates weights using new gradients
+
+                total_train_loss += loss.item() * bx.size(0)    # Accumulates losses of each batch
+            
+            train_loss = total_train_loss / len(train_dataset)
+            
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                v_val = model(x_vl.to(device))
+                val_loss = criterion(y_vl.to(device), v_val).item()
+                
+            scheduler.step(val_loss)
+            history['train_loss'].append(train_loss)
+            history['val_loss'].append(val_loss)
+            
+            # Save best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                if save_path:
+                    torch.save(model.state_dict(), save_path)
+            
+            if epoch == 1 or epoch % 50 == 0 or epoch == epochs:
+                current_lr = optimiser.param_groups[0]['lr']
+                elapsed_50 = time.perf_counter() - t0_interval
+                print(f"\rEpoch [{epoch:4d}/{epochs:4d}] - Train SE: {-train_loss:.3f} bps/Hz | Val SE: {-val_loss:.3f} bps/Hz | LR: {current_lr:.1e} | Time: {elapsed_50:.2f}s")
+                t0_interval = time.perf_counter()
+            else:
+                print(f"\rTraining Epoch: {epoch:4d}/{epochs:4d}...", end="", flush=True)
+        print()
+        total_time = time.perf_counter() - t0_total
+        print(f"[INFO] Training finished in {total_time:.2f}s ({total_time / epochs * 1000:.1f} ms/epoch)")
+    except KeyboardInterrupt:
+        total_time = time.perf_counter() - t0_total
+        print(f"\n\n[WARNING] Training interrupted by user (Ctrl + C) after {total_time:.2f}s!")
+        print(f"[INFO] Preserving best model checkpoint saved up to this point.")
+
+    # Save the overall best model
+    if save_path and Path(save_path).exists():
+        model.load_state_dict(torch.load(save_path, weights_only=True))
+
+    return model, history       
+
+# ! Change to toml and uv.lock

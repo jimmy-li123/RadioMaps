@@ -1,4 +1,4 @@
-# TODO ACTUALLY READ
+# TODO maybe include results at the end
 
 # Python bytecode
 __pycache__/
@@ -11,6 +11,9 @@ env/
 .venv/
 
 # Large dataset caches & saved checkpoints
+data/raw/
+data/sydney/
+data/o1/
 data/processed/
 saved_models/
 *.npy
@@ -22,6 +25,7 @@ saved_models/
 .idea/
 
 Gemini.md
+TODO.md
 
 # results
 outputs/

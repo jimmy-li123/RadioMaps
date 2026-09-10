@@ -18,6 +18,7 @@ import os
 import sys
 import time
 from pathlib import Path
+import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
@@ -39,7 +40,107 @@ B     = config.B
 lamda = config.LAMBDA_VAL
 d     = config.ANTENNA_SPACING
 
-# ? Fix 
+# =====================================================================      
+# Dataset Loading & CLI Parsing                                              
+# ===================================================================== 
+def load_dataset(dataset_name=None, return_aod=False, return_bsloc=False, eliminate_blocked=True):
+    """
+    Loads dataset arrays (UEloc, CSI, LoS, and optionally BSloc, AoD) from 'sydney' or any extra simulation (e.g. 'o1').
+    Ensures standard array shapes across all simulations:
+      - UEloc: (N, 2)
+      - CSI:   (N, Nc, 1, Nt)
+      - LoS:   (N,)
+      - BSloc: (1, 2) [optional]
+      - AoD:   (N,)   [optional]
+    """
+    dataset_dir = config.get_dataset_dir(dataset_name)
+
+    UEloc = np.load(dataset_dir / "UEloc.npy")
+    CSI   = np.load(dataset_dir / "CSI.npy")
+    LoS   = np.load(dataset_dir / "LoS.npy")
+
+    # Standardize CSI shape to (N, Nc, 1, Nt) if needed
+    if CSI.ndim == 4 and CSI.shape[1] == config.NC and CSI.shape[2] == 1 and CSI.shape[3] == config.NT:
+        pass
+    elif CSI.ndim == 4 and CSI.shape[1] == 1 and CSI.shape[2] == config.NT and CSI.shape[3] == config.NC:
+        CSI = np.transpose(CSI, (0, 3, 1, 2))
+
+    BSloc = None
+    if return_bsloc or (dataset_dir / "BSloc.npy").exists():
+        try:
+            BSloc = np.load(dataset_dir / "BSloc.npy")
+            if BSloc.ndim == 1:
+                BSloc = BSloc[None, :]
+            if BSloc.shape[-1] > 2:
+                BSloc = BSloc[:, :2]
+        except Exception:
+            BSloc = None
+
+    AoD = None
+    if return_aod or (dataset_dir / "AoD.npy").exists():
+        try:
+            AoD = np.load(dataset_dir / "AoD.npy")
+        except Exception:
+            AoD = None
+
+    if eliminate_blocked:
+        valid_mask = (LoS != -1)
+        power = np.abs(np.sum(CSI.reshape(CSI.shape[0], -1), axis=1))
+        valid_mask = valid_mask & (power > 1e-15)
+        if not np.all(valid_mask):
+            UEloc = UEloc[valid_mask]
+            CSI = CSI[valid_mask]
+            LoS = LoS[valid_mask]
+            if AoD is not None:
+                AoD = AoD[valid_mask]
+
+    ret = [UEloc, CSI, LoS]
+    if return_bsloc:
+        ret.append(BSloc)
+    if return_aod:
+        ret.append(AoD)
+
+    return tuple(ret) if len(ret) > 1 else ret[0]
+
+
+def parse_args(description="Train and evaluate MIMO beamforming model", 
+               default_epochs=None, 
+               default_eta=None,
+               default_dataset=None):
+    """
+    Unified CLI parser reused across all training and baseline models.
+    """
+    if default_dataset is None:
+        default_dataset = config.DEFAULT_DATASET
+    if default_epochs is None:
+        default_epochs = config.EPOCHS_RM
+
+    parser = argparse.ArgumentParser(description=description)
+
+    parser.add_argument("--dataset", type=str, default=default_dataset,
+                        help=f"Dataset name to train/evaluate on (e.g. 'sydney', 'o1'). Default: '{default_dataset}'.")
+    parser.add_argument("--force-train", action="store_true", 
+                        help="Force retraining even if saved weights exist.")
+    parser.add_argument("--epochs", type=int, default=default_epochs, 
+                        help=f"Number of training epochs. Default: {default_epochs}.")
+    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, 
+                        help=f"Training batch size. Default: {config.BATCH_SIZE}.")
+    parser.add_argument("--lr", type=float, default=config.LEARNING_RATE, 
+                        help=f"Learning rate. Default: {config.LEARNING_RATE}.")
+    parser.add_argument("--snr", type=float, default=config.DEFAULT_SNR, 
+                        help=f"SNR in dB. Default: {config.DEFAULT_SNR}.")
+    parser.add_argument("--loc_std", type=float, default=config.DEFAULT_LOC_STD, 
+                        help=f"GPS positioning error std in meters. Default: {config.DEFAULT_LOC_STD}.")
+    parser.add_argument("--fading_ratio", type=float, default=config.DEFAULT_FADING_RATIO, 
+                        help=f"Rayleigh scattering fading ratio K. Default: {config.DEFAULT_FADING_RATIO}.")
+    
+    eta_val = default_eta if default_eta is not None else config.DEFAULT_ETA
+    parser.add_argument("--eta", type=int, default=eta_val, choices=[25, 50, 75, 100], 
+                        help=f"Reduced pilot density percentage (25, 50, 75, 100). Default: {eta_val}.")
+
+    return parser.parse_args()
+
+
 # =====================================================================      
 # Data Preprocessing Functions                                               
 # =====================================================================  
@@ -160,7 +261,6 @@ def cal_SE(H, V, noise):
     rate_Nc = np.mean(rate, axis=1)                     # Average over subcarriers                                                                    
     return rate_Nc       
 
-# ? Faster SVD - V_opt = H^H/abs(H)
 def cal_opt_SE(H, noise):
     """
     Calculates optimal spectral efficiency given appropriate CSI
@@ -233,12 +333,28 @@ class SELoss(nn.Module):
         rate = torch.log2(1.0 + SNR)
         return -torch.mean(rate)
         
-# ! Overfitting test w 5 samples
-def train_model(model, x_train, y_train, x_test, y_test, noise, 
-          epochs=1000, batch_size=128, lr=1e-3, save_path=None, device=None):
+def train_model(model, x_train, y_train, x_val=None, y_val=None, noise=None, 
+                epochs=1000, batch_size=128, lr=1e-3, save_path=None, device=None,
+                args=None, x_test=None, y_test=None):
     """
-    Universal training loop for models
+    Universal training loop for models with support for unified CLI args,
+    device selection, validation tracking, ETA estimation, and model checkpointing.
     """
+    # Override defaults if args Namespace is provided
+    if args is not None:
+        if hasattr(args, 'epochs') and args.epochs is not None:
+            epochs = args.epochs
+        if hasattr(args, 'batch_size') and args.batch_size is not None:
+            batch_size = args.batch_size
+        if hasattr(args, 'lr') and args.lr is not None:
+            lr = args.lr
+
+    # Handle alias x_test/y_test for backward compatibility
+    if x_val is None and x_test is not None:
+        x_val = x_test
+    if y_val is None and y_test is not None:
+        y_val = y_test
+
     if device is None:
         device = config.DEVICE
     
@@ -253,8 +369,8 @@ def train_model(model, x_train, y_train, x_test, y_test, noise,
     # Convert to PyTorch Tensors
     x_tr = torch.as_tensor(x_train, dtype=torch.float32)    # x is real valued
     y_tr = torch.as_tensor(y_train, dtype=torch.complex64)  # y is im
-    x_vl = torch.as_tensor(x_test, dtype=torch.float32)
-    y_vl = torch.as_tensor(y_test, dtype=torch.complex64)
+    x_vl = torch.as_tensor(x_val, dtype=torch.float32)
+    y_vl = torch.as_tensor(y_val, dtype=torch.complex64)
 
     # Separate into batches
     train_dataset = TensorDataset(x_tr, y_tr)       # Separates input into paired samples
@@ -263,7 +379,7 @@ def train_model(model, x_train, y_train, x_test, y_test, noise,
     best_val_loss = float('inf')    # Initial loss
     history = {'train_loss': [], 'val_loss': []}
     
-    print(f"Starting training on {device} ({epochs} epochs, batch_size={batch_size})...")
+    print(f"Starting training on {device} ({epochs} epochs, batch_size={batch_size}, lr={lr:.1e})...")
 
     t0_total = time.perf_counter()
     t0_interval = time.perf_counter()
@@ -301,14 +417,23 @@ def train_model(model, x_train, y_train, x_test, y_test, noise,
                 best_val_loss = val_loss
                 if save_path:
                     torch.save(model.state_dict(), save_path)
+
+            elapsed_total = time.perf_counter() - t0_total
+            sec_per_epoch = elapsed_total / epoch
+            ms_per_epoch = sec_per_epoch * 1000.0
+            remaining_sec = sec_per_epoch * (epochs - epoch)
+            if remaining_sec >= 60:
+                eta_str = f"{int(remaining_sec // 60)}m {int(remaining_sec % 60):02d}s"
+            else:
+                eta_str = f"{remaining_sec:.1f}s"
             
             if epoch == 1 or epoch % 50 == 0 or epoch == epochs:
                 current_lr = optimiser.param_groups[0]['lr']
                 elapsed_50 = time.perf_counter() - t0_interval
-                print(f"\rEpoch [{epoch:4d}/{epochs:4d}] - Train SE: {-train_loss:.3f} bps/Hz | Val SE: {-val_loss:.3f} bps/Hz | LR: {current_lr:.1e} | Time: {elapsed_50:.2f}s")
+                print(f"\rEpoch [{epoch:4d}/{epochs:4d}] - Train SE: {-train_loss:.3f} bps/Hz | Val SE: {-val_loss:.3f} bps/Hz | LR: {current_lr:.1e} | {ms_per_epoch:.1f}ms/ep | ETA: {eta_str}")
                 t0_interval = time.perf_counter()
             else:
-                print(f"\rTraining Epoch: {epoch:4d}/{epochs:4d}...", end="", flush=True)
+                print(f"\rEpoch [{epoch:4d}/{epochs:4d}] ({ms_per_epoch:.1f}ms/ep, ETA: {eta_str})...", end="", flush=True)
         print()
         total_time = time.perf_counter() - t0_total
         print(f"[INFO] Training finished in {total_time:.2f}s ({total_time / epochs * 1000:.1f} ms/epoch)")
@@ -319,8 +444,6 @@ def train_model(model, x_train, y_train, x_test, y_test, noise,
 
     # Save the overall best model
     if save_path and Path(save_path).exists():
-        model.load_state_dict(torch.load(save_path, weights_only=True))
+        model.load_state_dict(torch.load(save_path, map_location=device, weights_only=True))
 
     return model, history       
-
-# ! Change to toml and uv.lock

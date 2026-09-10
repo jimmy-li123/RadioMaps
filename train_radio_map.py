@@ -1,5 +1,4 @@
 # Radio Maps model script
-# ? add argument when running script
 # Note this is worse than CKM, but is much faster, smaller and more versatile
 
 # ! Time and verify Apparently much faster (12x ish) by torch c++ execution and avoids svd
@@ -21,32 +20,19 @@ import config
 from utils.metrics import *
 from models.radio_map import RadioMapNet
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train and evaluate Radio Map model")
-
-    parser.add_argument("--force-train", action="store_true", help="Force retraining even if saved weights exist.")
-    parser.add_argument("--epochs", type=int, default=config.EPOCHS_RM, help="Number of training epochs.")
-    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help="Training batch size.")
-    parser.add_argument("--lr", type=float, default=config.LEARNING_RATE, help="Learning rate.")
-
-    return parser.parse_args()
-
 def main():
-    args = parse_args()
+    args = parse_args(description="Train and evaluate Radio Map model", default_epochs=config.EPOCHS_RM)
     
-    # parameters
-    loc_std      = config.DEFAULT_LOC_STD
-    fading_ratio = config.DEFAULT_FADING_RATIO
-    SNR          = config.DEFAULT_SNR
+    # Parameters
+    loc_std      = args.loc_std
+    fading_ratio = args.fading_ratio
+    SNR          = args.snr
     Nc           = config.NC
     Nt           = config.NT
     device       = config.DEVICE
 
-    # Load data arrays explicitly
-    UEloc = np.load(config.PROCESSED_DATA_DIR / 'UEloc.npy')                                             
-    BSloc = np.load(config.PROCESSED_DATA_DIR / 'BSloc.npy')                                             
-    CSI   = np.load(config.PROCESSED_DATA_DIR / 'CSI.npy')                                               
-    LoS   = np.load(config.PROCESSED_DATA_DIR / 'LoS.npy') 
+    # Load data arrays
+    UEloc, CSI, LoS = load_dataset(args.dataset)
 
     # Format and add realistic errors
     UEloc, CSI = eliminate_block(UEloc, CSI)
@@ -55,7 +41,7 @@ def main():
     CSI_fading = add_fading(CSI, fading_ratio)
     CSI_noise = add_noise(CSI_fading, SNR).astype(np.complex64)
 
-    # Divide train, valdiation and test set 
+    # Divide train, validation and test set 
     N_samples = UEloc.shape[0]
 
     # First split into clean 20% test set
@@ -83,11 +69,14 @@ def main():
 
     # Check if weights are already computed
     config.SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = config.SAVED_MODELS_DIR / "RM.pth"
+    save_path = config.SAVED_MODELS_DIR / f"RM_{args.dataset}.pth"
+    if not save_path.exists() and args.dataset == "sydney" and (config.SAVED_MODELS_DIR / "RM.pth").exists():
+        save_path = config.SAVED_MODELS_DIR / "RM.pth"
     
     model = RadioMapNet(Nc, Nt)
-    
-    history_path = config.OUTPUTS_DIR / "RM_history.json"
+    history_path = config.OUTPUTS_DIR / f"RM_{args.dataset}_history.json"
+    if not history_path.exists() and args.dataset == "sydney" and (config.OUTPUTS_DIR / "RM_history.json").exists():
+        history_path = config.OUTPUTS_DIR / "RM_history.json"
 
     if save_path.exists() and not args.force_train:
         rel_save = save_path.relative_to(PROJECT_ROOT) if save_path.is_relative_to(PROJECT_ROOT) else save_path
@@ -104,17 +93,15 @@ def main():
             except (json.JSONDecodeError, Exception):
                 pass
     else:
-        print(f"Training RadioMapNet for {args.epochs} epochs...")
+        print(f"Training RadioMapNet ({args.dataset}) for {args.epochs} epochs...")
         model, history = train_model(
             model = model,
             x_train = x_train,
             y_train = y_train,
-            x_test = x_val,
-            y_test = y_val,
+            x_val = x_val,
+            y_val = y_val,
             noise = noise,
-            epochs = args.epochs,
-            batch_size = args.batch_size,
-            lr = args.lr,
+            args = args,
             save_path = save_path,
             device = device
         )

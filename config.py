@@ -16,11 +16,37 @@ from pathlib import Path
 import torch                                                                    
                                                                                 
 BASE_DIR           = Path(__file__).resolve().parent
-RAW_DATA_DIR       = BASE_DIR / "data" / "raw"
-PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+DATA_DIR           = BASE_DIR / "data"
+RAW_DATA_DIR       = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "sydney"            # default sim
 SAVED_MODELS_DIR   = BASE_DIR / "saved_models"
 OUTPUTS_DIR        = BASE_DIR / "outputs"
-                                                                                
+
+DEFAULT_DATASET    = "sydney"
+
+def get_dataset_dir(dataset_name=None):
+    """
+    Resolves the directory containing dataset arrays for 'sydney' or any extra simulation (e.g. 'o1').
+    """
+    if dataset_name is None:
+        dataset_name = DEFAULT_DATASET
+    name = str(dataset_name).strip().lower()
+
+    if name in ("sydney", "processed"):
+        return DATA_DIR / "sydney"
+
+    custom_dir = DATA_DIR / name
+    if custom_dir.exists():
+        return custom_dir
+
+    raw_dir = RAW_DATA_DIR / name
+    if raw_dir.exists():
+        return raw_dir
+
+    raise FileNotFoundError(
+        f"Dataset '{dataset_name}' not found. Checked: {custom_dir} and {PROCESSED_DATA_DIR}."
+    )
+
 # Physical & MIMO Array Constants                                               
 FC = 3.5e9   # 3.5 GHz carrier frequency                               
 B  = 10.0e6  # 10 MHz bandwidth                                        
@@ -31,6 +57,7 @@ N_USERS         = 27805
 NT              = 32                # Transmit antennas at Base Station                       
 NR              = 1                 # Single antenna user equipment                           
 NC              = 12                # 12 OFDM subcarriers                                     
+NS              = 14                # 14 OFDM symbols per slot / resource block                                     
                                                                                 
 # Simulation Defaults                                                           
 DEFAULT_SNR          = 15.0    # dB                                                 

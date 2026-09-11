@@ -83,3 +83,12 @@ EPOCHS_RP     = 100
 EPOCHS_INT    = 200
 DEVICE        = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps. 
 is_available() else "cpu")
+# search for best parameters
+# Coordinates are normalized in [0, 1] (variance ~0.05), so gamma='scale' is ~10.
+# Gamma values should be scaled appropriately for normalized inputs.
+PARAM_GRID = {'C': [0.1, 1, 10, 50, 100, 500],
+              'gamma': ['scale', 0.1, 0.5, 1, 5, 10, 20, 50],
+              'kernel': ['rbf']}
+PARAM_GRID_MIN = {'C': [1, 10, 50, 100],
+                  'gamma': ['scale', 1.0, 5.0, 10.0, 20.0],
+                  'kernel': ['rbf']}

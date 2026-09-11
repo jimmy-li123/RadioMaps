@@ -32,10 +32,13 @@ RadioMaps/
     ├── README.md                  # Project overview, workflow, and execution instructions
     ├── requirements.txt           # Python dependencies (PyTorch, NumPy, SciPy, scikit-learn)
     ├── config.py                  # Central configuration (MIMO parameters, paths, training hyperparameters)
+    ├── train.py                   # Master multi-model training orchestrator
+    ├── evaluate.py                # Master benchmarking & evaluation suite
     │
-    ├── train_radio_map.py         # Radio Map MLP training & evaluation script
-    ├── train_reduced_pilot.py     # Reduced Pilot ResNet training & evaluation script
-    ├── train.py                   # End-to-end multi-model pipeline orchestrator
+    ├── scripts/                   # Model training and experiment execution scripts
+    │   ├── train_radio_map.py     # Radio Map MLP training & evaluation script
+    │   ├── train_reduced_pilot.py # Reduced Pilot ResNet training & evaluation script
+    │   └── train_integrate.py     # Integration fusion CNN training script
     │
     ├── data/                      # Multi-simulation dataset management
     │   ├── README.md              # Dataset format specifications and import instructions
@@ -111,20 +114,20 @@ python models/baseline/CKM.py --dataset o1
 Trains a 3-layer MLP mapping user coordinates $(x, y) \to \mathbf{V}_{\text{RM}} \in \mathbb{C}^{N_c \times N_t \times 1}$ using unsupervised spectral efficiency loss:
 ```bash
 # Train or evaluate on Sydney
-python train_radio_map.py --dataset sydney
+python scripts/train_radio_map.py --dataset sydney
 
 # Train on O1 with custom epochs
-python train_radio_map.py --dataset o1 --epochs 1000 --force-train
+python scripts/train_radio_map.py --dataset o1 --epochs 1000 --force-train
 ```
 
 ### 3. Reduced Pilot ResNet
 Reconstructs the full beamforming vector $\mathbf{V}_{\text{RP}}$ from sparse pilot measurements ($\eta \in \{25\%, 50\%, 75\%, 100\%\}$):
 ```bash
 # Run with default 50% pilot density
-python train_reduced_pilot.py --dataset sydney --eta 50
+python scripts/train_reduced_pilot.py --dataset sydney --eta 50
 
 # Run on O1
-python train_reduced_pilot.py --dataset o1 --eta 50
+python scripts/train_reduced_pilot.py --dataset o1 --eta 50
 ```
 
 ---

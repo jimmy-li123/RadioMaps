@@ -103,12 +103,13 @@ def load_dataset(dataset_name=None, return_aod=False, return_bsloc=False, elimin
     return tuple(ret) if len(ret) > 1 else ret[0]
 
 
-def parse_args(description="Train and evaluate MIMO beamforming model", 
-               default_epochs=None, 
-               default_eta=None,
-               default_dataset=None):
+def get_base_parser(description="Train and evaluate MIMO beamforming model", 
+                    default_epochs=None, 
+                    default_eta=None,
+                    default_dataset=None):
     """
-    Unified CLI parser reused across all training and baseline models.
+    Creates and returns the unified base ArgumentParser containing standard simulation
+    and channel flags. Scripts with custom flags can call this and attach extra arguments.
     """
     if default_dataset is None:
         default_dataset = config.DEFAULT_DATASET
@@ -138,6 +139,22 @@ def parse_args(description="Train and evaluate MIMO beamforming model",
     parser.add_argument("--eta", type=int, default=eta_val, choices=[25, 50, 75, 100], 
                         help=f"Reduced pilot density percentage (25, 50, 75, 100). Default: {eta_val}.")
 
+    return parser
+
+
+def parse_args(description="Train and evaluate MIMO beamforming model", 
+               default_epochs=None, 
+               default_eta=None,
+               default_dataset=None):
+    """
+    Shortcut that instantiates get_base_parser and returns parsed args for standard scripts.
+    """
+    parser = get_base_parser(
+        description=description,
+        default_epochs=default_epochs,
+        default_eta=default_eta,
+        default_dataset=default_dataset
+    )
     return parser.parse_args()
 
 
@@ -447,3 +464,19 @@ def train_model(model, x_train, y_train, x_val=None, y_val=None, noise=None,
         model.load_state_dict(torch.load(save_path, map_location=device, weights_only=True))
 
     return model, history       
+
+
+# =====================================================================      
+# Re-export Reusable Data Pipeline Helpers
+# ===================================================================== 
+from utils.data_helpers import (
+    split_indices,
+    prepare_loc_features,
+    mask_pilots,
+    prepare_pilot_features,
+    prepare_integration_features,
+    get_model_paths,
+    load_weights_if_available,
+    load_pretrained_model,
+    generate_svm_labels,
+)

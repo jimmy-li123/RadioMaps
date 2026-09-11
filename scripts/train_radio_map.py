@@ -12,7 +12,7 @@ import torch
 import json
 from sklearn.model_selection import train_test_split
 
-PROJECT_ROOT = Path(__file__).resolve().parents[0]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -36,26 +36,12 @@ def main():
 
     # Format and add realistic errors
     UEloc, CSI = eliminate_block(UEloc, CSI)
-    UEloc_error = add_error(UEloc, loc_std)
-    loc_norm = normalise_loc(UEloc_error)
+    loc_norm = prepare_loc_features(UEloc, loc_std)
     CSI_fading = add_fading(CSI, fading_ratio)
     CSI_noise = add_noise(CSI_fading, SNR).astype(np.complex64)
 
-    # Divide train, validation and test set 
-    N_samples = UEloc.shape[0]
-
-    # First split into clean 20% test set
-    train_val_idx, test_idx = train_test_split(
-        np.arange(N_samples), 
-        test_size=config.TEST_SIZE, 
-        random_state=config.RANDOM_SEED
-    )
-
-    train_idx, val_idx = train_test_split(
-        train_val_idx,
-        test_size=config.VAL_SIZE,
-        random_state=config.RANDOM_SEED
-    )   
+    # Deterministic train/val/test split
+    train_idx, val_idx, test_idx = split_indices(len(UEloc))
 
     x_train, x_val = loc_norm[train_idx], loc_norm[val_idx]
     y_train, y_val = CSI_noise[train_idx], CSI_noise[val_idx]           # Noisy CSI for training loss
@@ -68,31 +54,10 @@ def main():
     noise = power / (10 ** (SNR / 10))
 
     # Check if weights are already computed
-    config.SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = config.SAVED_MODELS_DIR / f"RM_{args.dataset}.pth"
-    if not save_path.exists() and args.dataset == "sydney" and (config.SAVED_MODELS_DIR / "RM.pth").exists():
-        save_path = config.SAVED_MODELS_DIR / "RM.pth"
-    
-    model = RadioMapNet(Nc, Nt)
-    history_path = config.OUTPUTS_DIR / f"RM_{args.dataset}_history.json"
-    if not history_path.exists() and args.dataset == "sydney" and (config.OUTPUTS_DIR / "RM_history.json").exists():
-        history_path = config.OUTPUTS_DIR / "RM_history.json"
+    model = RadioMapNet(Nc, Nt).to(device)
+    save_path, history_path = get_model_paths("RM", args.dataset)
 
-    if save_path.exists() and not args.force_train:
-        rel_save = save_path.relative_to(PROJECT_ROOT) if save_path.is_relative_to(PROJECT_ROOT) else save_path
-        print(f"Found pre-trained weights at: {rel_save} (use --force-train to retrain)...")
-        model.load_state_dict(torch.load(save_path, map_location=device, weights_only=True))
-        model = model.to(device)
-        if history_path.exists() and history_path.stat().st_size > 0:
-            try:
-                with open(history_path, "r") as f:
-                    hist = json.load(f)
-                    if "val_loss" in hist and len(hist["val_loss"]) > 0:
-                        best_val = min(hist["val_loss"])
-                        print(f"Loaded model best validation SE: {-best_val:.3f} bps/Hz")
-            except (json.JSONDecodeError, Exception):
-                pass
-    else:
+    if not load_weights_if_available(model, save_path, history_path, args.force_train, device):
         print(f"Training RadioMapNet ({args.dataset}) for {args.epochs} epochs...")
         model, history = train_model(
             model = model,
@@ -133,14 +98,27 @@ def main():
     RM2opt_NLoS = (RM_NLoS_SE / opt_NLoS_SE) * 100 if opt_NLoS_SE > 0 else 0.0  
 
     # Print result
-    print('RM2opt:', np.round(RM2opt, 3), '%')
-    print('RM LoS:', np.round(RM2opt_LoS, 3), '%')
-    print('RM NLoS:', np.round(RM2opt_NLoS, 3), '%')
+    print("=" * 50)
+    print(f"Radio Map Results ({args.dataset.upper()} @ SNR={SNR}dB, loc_std={loc_std}m)")
+    print("=" * 50)
+    print(f"Pilot overhead rho: 0.00% (zero overhead)")
+    print(f"Raw RM SE:    {np.mean(RM_SE):.3f} bps/Hz")
+    print(f"opt_SE:       {np.mean(opt_SE):.3f} bps/Hz")
+    print(f"RM2opt (Raw): {RM2opt:.3f} %")
+    print(f"RM LoS:       {RM2opt_LoS:.3f} %")
+    print(f"RM NLoS:      {RM2opt_NLoS:.3f} %")
 
 if __name__ == '__main__':
     main()
     
-    
-# RM2opt: 92.933 %
-# RM LoS: 94.02 %
-# RM NLoS: 76.127 %
+"""
+==================================================                                                                                     
+Radio Map Results (SYDNEY @ SNR=15.0dB, loc_std=1.0m)                                                                                  
+==================================================                                                                                     
+Pilot overhead rho: 0.00% (zero overhead)                                                                                              
+Raw RM SE:    7.229 bps/Hz                                                                                                             
+opt_SE:       7.853 bps/Hz                                                                                                             
+RM2opt (Raw): 92.055 % 
+RM LoS:       93.079 %                                                                                                                 
+RM NLoS:      76.206 %                  
+"""
